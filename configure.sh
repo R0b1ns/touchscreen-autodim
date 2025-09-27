@@ -2,6 +2,7 @@
 # Autodim Configure - reliably detects the touchscreen
 
 CONF_PATH="$(dirname "$(realpath "$0")")/autodim.conf"
+SERVICE_NAME="autodim.service"
 
 echo "Please tap once on the touchscreen..."
 echo "Press CTRL+C to cancel."
@@ -34,3 +35,5 @@ while True:
             print(f"Touchscreen device detected: {touch_device}")
             exit(0)
 EOF
+
+sudo systemctl restart $SERVICE_NAME

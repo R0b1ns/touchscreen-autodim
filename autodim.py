@@ -6,7 +6,7 @@ import configparser
 import os
 import select
 
-# --- Config laden ---
+# --- Load configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, 'autodim.conf')
 
@@ -22,42 +22,46 @@ IDLE_DIM = int(cfg.get('idle_dim'))
 IDLE_OFF = int(cfg.get('idle_off'))
 BRIGHTNESS_PATH = cfg.get('backlight_path')
 
+# --- Function to set backlight brightness ---
 def set_brightness(value):
     subprocess.run(["sudo", "tee", BRIGHTNESS_PATH],
                    input=str(value), text=True, stdout=subprocess.DEVNULL)
 
-# --- Initial ---
+# --- Initial setup ---
 set_brightness(BRIGHTNESS_MAX)
 current_brightness = BRIGHTNESS_MAX
 last_event = time.time()
 
+# --- Open the input device ---
 device = evdev.InputDevice(DEVICE)
 
 while True:
     now = time.time()
     idle_time = now - last_event
 
-    # Berechne Timeout für select
+    # --- Calculate timeout for select ---
     if idle_time < IDLE_DIM:
         timeout = IDLE_DIM - idle_time
         target_brightness = BRIGHTNESS_MAX
     elif idle_time < IDLE_OFF:
         timeout = IDLE_OFF - idle_time
+        # Dim screen if needed
         if current_brightness != BRIGHTNESS_LOW:
             set_brightness(BRIGHTNESS_LOW)
             current_brightness = BRIGHTNESS_LOW
         target_brightness = BRIGHTNESS_LOW
     else:
-        timeout = None  # unendlich blockieren, Bildschirm aus
+        timeout = None  # Block indefinitely, screen off
         if current_brightness != BRIGHTNESS_MIN:
             set_brightness(BRIGHTNESS_MIN)
             current_brightness = BRIGHTNESS_MIN
         target_brightness = BRIGHTNESS_MIN
 
-    # Blockierend auf Input warten
+    # --- Wait for input event or timeout ---
     r, _, _ = select.select([device.fd], [], [], timeout)
     if r:
         for event in device.read():
+            # Reset brightness on input
             set_brightness(BRIGHTNESS_MAX)
             current_brightness = BRIGHTNESS_MAX
             last_event = time.time()

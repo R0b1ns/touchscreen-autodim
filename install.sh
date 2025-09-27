@@ -37,7 +37,7 @@ deactivate
 # --- Create systemd service ---
 cat << EOF | sudo tee /etc/systemd/system/$SERVICE_NAME
 [Unit]
-Description=Autodim Raspberry Pi Touchscreen
+Description=Autodim Touchscreen
 After=multi-user.target
 
 [Service]
@@ -53,7 +53,7 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable $SERVICE_NAME
-sudo systemctl start $SERVICE_NAME
+sudo systemctl restart $SERVICE_NAME
 
 echo "Autodim installed, .venv created and service started."
 echo "Please run configure.sh to set up the touchscreen device."

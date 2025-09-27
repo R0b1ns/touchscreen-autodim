@@ -1,32 +1,24 @@
 #!/bin/bash
-# Autodim Installer mit automatischer Erkennung von Backlight & Input Device
+# Autodim Installer - pure installation
 
 SCRIPT_PATH="$(realpath autodim.py)"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 SERVICE_NAME="autodim.service"
 VENV_DIR="$SCRIPT_DIR/.venv"
+CONF_PATH="$SCRIPT_DIR/autodim.conf"
 
-# --- Backlight automatisch erkennen ---
+# --- Automatically detect backlight ---
 BACKLIGHT_PATH=$(ls /sys/class/backlight | head -n1)
 if [ -z "$BACKLIGHT_PATH" ]; then
-    echo "Kein Backlight Device gefunden!"
+    echo "No backlight device found!"
     exit 1
 fi
 BACKLIGHT_PATH="/sys/class/backlight/$BACKLIGHT_PATH/brightness"
 
-# --- Input Device automatisch erkennen ---
-if [ -e /dev/input/mouse0 ]; then
-    INPUT_DEVICE="/dev/input/mouse0"
-else
-	# erstes eventX, das kein mouse device ist
-    INPUT_DEVICE=$(ls /dev/input/event* | head -n1)
-fi
-
-# --- .conf anpassen ---
-CONF_PATH="$SCRIPT_DIR/autodim.conf"
+# --- Create default .conf ---
 cat << EOF > "$CONF_PATH"
 [autodim]
-device = $INPUT_DEVICE
+device = /dev/input/eventX
 brightness_max = 31
 brightness_low = 5
 brightness_min = 0
@@ -35,14 +27,14 @@ idle_off = 3600
 backlight_path = $BACKLIGHT_PATH
 EOF
 
-# --- VENV erstellen ---
+# --- Create Python virtual environment ---
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 pip install evdev
 deactivate
 
-# --- Systemd-Service erstellen ---
+# --- Create systemd service ---
 cat << EOF | sudo tee /etc/systemd/system/$SERVICE_NAME
 [Unit]
 Description=Autodim Raspberry Pi Touchscreen
@@ -59,9 +51,9 @@ WorkingDirectory=$SCRIPT_DIR
 WantedBy=multi-user.target
 EOF
 
-# --- Systemd aktivieren & starten ---
 sudo systemctl daemon-reload
 sudo systemctl enable $SERVICE_NAME
 sudo systemctl start $SERVICE_NAME
 
-echo "Autodim installiert, .venv erstellt, Backlight und Input Device automatisch erkannt."
+echo "Autodim installed, .venv created and service started."
+echo "Please run configure.sh to set up the touchscreen device."

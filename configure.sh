@@ -1,19 +1,18 @@
 #!/bin/bash
-# Autodim Configure - reliably detects the touchscreen input device using actual input events
+# Autodim Configure - reliably detects the touchscreen
 
 CONF_PATH="$(dirname "$(realpath "$0")")/autodim.conf"
 
 echo "Please tap once on the touchscreen..."
 echo "Press CTRL+C to cancel."
 
-# --- List all event devices ---
-DEVICES=$(ls /dev/input/event*)
+python3 << EOF
+import evdev, select, os
 
-# --- Python one-liner to detect the first device producing events ---
-TOUCH_DEVICE=$(python3 <<EOF
-import evdev, select
+CONF_PATH = "$CONF_PATH"
 
-devices = [evdev.InputDevice(d) for d in "$DEVICES".split()]
+# List all event devices
+devices = [evdev.InputDevice(d) for d in evdev.list_devices()]
 fds = {dev.fd: dev for dev in devices}
 
 # Wait for the first event
@@ -22,13 +21,16 @@ while True:
     for fd in r:
         dev = fds[fd]
         for event in dev.read():
-            print(dev.path)
+            # Found first input event
+            touch_device = dev.path
+            with open(CONF_PATH, 'r') as f:
+                lines = f.readlines()
+            with open(CONF_PATH, 'w') as f:
+                for line in lines:
+                    if line.startswith('device ='):
+                        f.write(f'device = {touch_device}\n')
+                    else:
+                        f.write(line)
+            print(f"Touchscreen device detected: {touch_device}")
             exit(0)
 EOF
-)
-
-# --- Write detected device to .conf ---
-sed -i "s|device = .*|device = $TOUCH_DEVICE|" "$CONF_PATH"
-
-echo "Touchscreen device detected: $TOUCH_DEVICE"
-echo "Autodim configuration updated."

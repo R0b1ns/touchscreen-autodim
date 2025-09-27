@@ -24,6 +24,7 @@ BRIGHTNESS_PATH = cfg.get('backlight_path')
 
 # --- Function to set screen brightness ---
 def set_brightness(value: int):
+	print(f"set_brightness({value})")
     """Set the backlight brightness to the specified value."""
     subprocess.run(["sudo", "tee", BRIGHTNESS_PATH],
                    input=str(value), text=True, stdout=subprocess.DEVNULL)
@@ -59,6 +60,7 @@ while True:
     elif idle_time < IDLE_OFF:
         timeout = IDLE_OFF - idle_time
         if current_brightness != BRIGHTNESS_LOW:
+        	print("Fade to BRIGHTNESS_LOW")
             current_brightness = fade_brightness(current_brightness, BRIGHTNESS_LOW)
     else:
         timeout = None  # Wait indefinitely, screen is off
@@ -66,6 +68,7 @@ while True:
             set_brightness(BRIGHTNESS_MIN)
             current_brightness = BRIGHTNESS_MIN
             swallow_first_event = True
+            print("Grab Device")
             device.grab()  # Temporarily grab device to block OS events
 
     # --- Wait for input or timeout ---
@@ -74,16 +77,19 @@ while True:
         for event in device.read():
             # --- Handle first input after screen off ---
             if swallow_first_event and event.type == evdev.ecodes.EV_KEY:
+            	print("swallow_first_event")
                 set_brightness(BRIGHTNESS_MAX)  # Restore screen brightness
                 current_brightness = BRIGHTNESS_MAX
                 last_event = time.time()
                 swallow_first_event = False
+                print("Ungrab Device")
                 device.ungrab()  # Release device so OS receives further events
                 break  # Only affects Python loop, not OS event handling
 
             # --- Normal input processing ---
             last_event = time.time()
             if current_brightness != BRIGHTNESS_MAX:
+            	print("Normal input processing")
                 set_brightness(BRIGHTNESS_MAX)
                 current_brightness = BRIGHTNESS_MAX
             break

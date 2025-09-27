@@ -27,6 +27,17 @@ def set_brightness(value):
     subprocess.run(["sudo", "tee", BRIGHTNESS_PATH],
                    input=str(value), text=True, stdout=subprocess.DEVNULL)
 
+# --- Function to fade brightness ---
+def fade_brightness(from_value, to_value, step=1, delay=0.02):
+    if from_value < to_value:
+        rng = range(from_value, to_value + 1, step)
+    else:
+        rng = range(from_value, to_value - 1, -step)
+    for val in rng:
+        set_brightness(val)
+        time.sleep(delay)
+    return to_value
+
 # --- Initial setup ---
 set_brightness(BRIGHTNESS_MAX)
 current_brightness = BRIGHTNESS_MAX
@@ -45,10 +56,11 @@ while True:
         target_brightness = BRIGHTNESS_MAX
     elif idle_time < IDLE_OFF:
         timeout = IDLE_OFF - idle_time
+
         # Dim screen if needed
-        if current_brightness != BRIGHTNESS_LOW:
-            set_brightness(BRIGHTNESS_LOW)
-            current_brightness = BRIGHTNESS_LOW
+		if current_brightness != BRIGHTNESS_LOW:
+		    current_brightness = fade_brightness(current_brightness, BRIGHTNESS_LOW)
+
         target_brightness = BRIGHTNESS_LOW
     else:
         timeout = None  # Block indefinitely, screen off

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Autodim Configure - reliably detects the touchscreen input device
+# Autodim Configure - reliably detects the touchscreen input device using actual input events
 
 CONF_PATH="$(dirname "$(realpath "$0")")/autodim.conf"
 
@@ -9,20 +9,23 @@ echo "Press CTRL+C to cancel."
 # --- List all event devices ---
 DEVICES=$(ls /dev/input/event*)
 
-TOUCH_DEVICE=""
+# --- Python one-liner to detect the first device producing events ---
+TOUCH_DEVICE=$(python3 <<EOF
+import evdev, select
 
-# Loop until a device is detected from the touch input
-while [ -z "$TOUCH_DEVICE" ]; do
-    for DEV in $DEVICES; do
-        # --- Check if device can provide events ---
-        # Use evtest in non-blocking mode with timeout
-        OUTPUT=$(sudo timeout 2 evtest "$DEV" 2>&1 | grep -m1 "EV_KEY\|EV_ABS")
-        if [ ! -z "$OUTPUT" ]; then
-            TOUCH_DEVICE="$DEV"
-            break
-        fi
-    done
-done
+devices = [evdev.InputDevice(d) for d in "$DEVICES".split()]
+fds = {dev.fd: dev for dev in devices}
+
+# Wait for the first event
+while True:
+    r, _, _ = select.select(fds.keys(), [], [])
+    for fd in r:
+        dev = fds[fd]
+        for event in dev.read():
+            print(dev.path)
+            exit(0)
+EOF
+)
 
 # --- Write detected device to .conf ---
 sed -i "s|device = .*|device = $TOUCH_DEVICE|" "$CONF_PATH"

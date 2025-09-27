@@ -58,9 +58,8 @@ while True:
         timeout = IDLE_OFF - idle_time
 
         # Dim screen if needed
-		if current_brightness != BRIGHTNESS_LOW:
-		    current_brightness = fade_brightness(current_brightness, BRIGHTNESS_LOW)
-
+        if current_brightness != BRIGHTNESS_LOW:
+            current_brightness = fade_brightness(current_brightness, BRIGHTNESS_LOW)
         target_brightness = BRIGHTNESS_LOW
     else:
         timeout = None  # Block indefinitely, screen off

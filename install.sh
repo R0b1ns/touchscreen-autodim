@@ -15,11 +15,11 @@ fi
 BACKLIGHT_PATH="/sys/class/backlight/$BACKLIGHT_PATH/brightness"
 
 # --- Input Device automatisch erkennen ---
-# erstes eventX, das kein mouse device ist
-INPUT_DEVICE=$(ls /dev/input/event* | head -n1)
-if [ -z "$INPUT_DEVICE" ]; then
-    echo "Kein Input Device gefunden!"
-    exit 1
+if [ -e /dev/input/mouse0 ]; then
+    INPUT_DEVICE="/dev/input/mouse0"
+else
+	# erstes eventX, das kein mouse device ist
+    INPUT_DEVICE=$(ls /dev/input/event* | head -n1)
 fi
 
 # --- .conf anpassen ---

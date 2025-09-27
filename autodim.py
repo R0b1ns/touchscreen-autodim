@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import evdev
-import uinput
 import subprocess
 import time
 import configparser
@@ -22,15 +21,16 @@ BRIGHTNESS_MIN = int(cfg.get('brightness_min'))
 IDLE_DIM = int(cfg.get('idle_dim'))
 IDLE_OFF = int(cfg.get('idle_off'))
 BRIGHTNESS_PATH = cfg.get('backlight_path')
-GRAB_EVENTS = cfg.getboolean('grab_events', fallback=True)  # neu: ob Events verschluckt werden
 
-# --- Function to set backlight brightness ---
-def set_brightness(value):
+# --- Function to set screen brightness ---
+def set_brightness(value: int):
+    """Set the backlight brightness to the specified value."""
     subprocess.run(["sudo", "tee", BRIGHTNESS_PATH],
                    input=str(value), text=True, stdout=subprocess.DEVNULL)
 
-# --- Function to fade brightness ---
-def fade_brightness(from_value, to_value, step=1, delay=0.02):
+# --- Function to fade brightness smoothly ---
+def fade_brightness(from_value: int, to_value: int, step: int = 1, delay: float = 0.02) -> int:
+    """Smoothly fade brightness from from_value to to_value."""
     if from_value < to_value:
         rng = range(from_value, to_value + 1, step)
     else:
@@ -44,65 +44,46 @@ def fade_brightness(from_value, to_value, step=1, delay=0.02):
 set_brightness(BRIGHTNESS_MAX)
 current_brightness = BRIGHTNESS_MAX
 last_event = time.time()
+swallow_first_event = False  # Flag for first input after screen is off
 
 # --- Open the input device ---
 device = evdev.InputDevice(DEVICE)
-
-# --- Optional: grab device to swallow events ---
-if GRAB_EVENTS:
-    device.grab()  # exklusiver Zugriff, OS bekommt keine Events direkt
-
-# --- Create virtual device (clone of real device) ---
-capabilities = device.capabilities()
-ui = uinput.Device(capabilities)
 
 while True:
     now = time.time()
     idle_time = now - last_event
 
-    # --- Calculate timeout for select ---
+    # --- Determine screen state and target brightness ---
     if idle_time < IDLE_DIM:
         timeout = IDLE_DIM - idle_time
-        target_brightness = BRIGHTNESS_MAX
     elif idle_time < IDLE_OFF:
         timeout = IDLE_OFF - idle_time
-
-        # Dim screen if needed
         if current_brightness != BRIGHTNESS_LOW:
             current_brightness = fade_brightness(current_brightness, BRIGHTNESS_LOW)
-        target_brightness = BRIGHTNESS_LOW
     else:
-        timeout = None  # Block indefinitely, screen off
+        timeout = None  # Wait indefinitely, screen is off
         if current_brightness != BRIGHTNESS_MIN:
             set_brightness(BRIGHTNESS_MIN)
             current_brightness = BRIGHTNESS_MIN
-        target_brightness = BRIGHTNESS_MIN
+            swallow_first_event = True
+            device.grab()  # Temporarily grab device to block OS events
 
-    # --- Wait for input event or timeout ---
+    # --- Wait for input or timeout ---
     r, _, _ = select.select([device.fd], [], [], timeout)
     if r:
         for event in device.read():
-            if current_brightness == BRIGHTNESS_MIN:
-                # Bildschirm war aus → erster Klick nur zum Aufwecken
-                set_brightness(BRIGHTNESS_MAX)
+            # --- Handle first input after screen off ---
+            if swallow_first_event and event.type == evdev.ecodes.EV_KEY:
+                set_brightness(BRIGHTNESS_MAX)  # Restore screen brightness
                 current_brightness = BRIGHTNESS_MAX
                 last_event = time.time()
-                break
-            else:
-                # --- Alte Lösung, nur Python lesen ---
-                # set_brightness(BRIGHTNESS_MAX)
-                # current_brightness = BRIGHTNESS_MAX
-                # last_event = time.time()
-                # break
+                swallow_first_event = False
+                device.ungrab()  # Release device so OS receives further events
+                break  # Only affects Python loop, not OS event handling
 
-                # Neue Lösung: Events ans OS weiterleiten via uinput
-                if event.type != evdev.ecodes.EV_SYN:
-                    ui.emit(event.type, event.code, event.value)
-                else:
-                    ui.syn()
-
-                # Reset brightness on input
+            # --- Normal input processing ---
+            last_event = time.time()
+            if current_brightness != BRIGHTNESS_MAX:
                 set_brightness(BRIGHTNESS_MAX)
                 current_brightness = BRIGHTNESS_MAX
-                last_event = time.time()
-                break
+            break

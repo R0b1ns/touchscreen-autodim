@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import evdev
+import uinput
 import subprocess
 import time
 import configparser
@@ -21,6 +22,7 @@ BRIGHTNESS_MIN = int(cfg.get('brightness_min'))
 IDLE_DIM = int(cfg.get('idle_dim'))
 IDLE_OFF = int(cfg.get('idle_off'))
 BRIGHTNESS_PATH = cfg.get('backlight_path')
+GRAB_EVENTS = cfg.getboolean('grab_events', fallback=True)  # neu: ob Events verschluckt werden
 
 # --- Function to set backlight brightness ---
 def set_brightness(value):
@@ -45,6 +47,14 @@ last_event = time.time()
 
 # --- Open the input device ---
 device = evdev.InputDevice(DEVICE)
+
+# --- Optional: grab device to swallow events ---
+if GRAB_EVENTS:
+    device.grab()  # exklusiver Zugriff, OS bekommt keine Events direkt
+
+# --- Create virtual device (clone of real device) ---
+capabilities = device.capabilities()
+ui = uinput.Device(capabilities)
 
 while True:
     now = time.time()
@@ -72,8 +82,27 @@ while True:
     r, _, _ = select.select([device.fd], [], [], timeout)
     if r:
         for event in device.read():
-            # Reset brightness on input
-            set_brightness(BRIGHTNESS_MAX)
-            current_brightness = BRIGHTNESS_MAX
-            last_event = time.time()
-            break
+            if current_brightness == BRIGHTNESS_MIN:
+                # Bildschirm war aus → erster Klick nur zum Aufwecken
+                set_brightness(BRIGHTNESS_MAX)
+                current_brightness = BRIGHTNESS_MAX
+                last_event = time.time()
+                break
+            else:
+                # --- Alte Lösung, nur Python lesen ---
+                # set_brightness(BRIGHTNESS_MAX)
+                # current_brightness = BRIGHTNESS_MAX
+                # last_event = time.time()
+                # break
+
+                # Neue Lösung: Events ans OS weiterleiten via uinput
+                if event.type != evdev.ecodes.EV_SYN:
+                    ui.emit(event.type, event.code, event.value)
+                else:
+                    ui.syn()
+
+                # Reset brightness on input
+                set_brightness(BRIGHTNESS_MAX)
+                current_brightness = BRIGHTNESS_MAX
+                last_event = time.time()
+                break

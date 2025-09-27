@@ -76,6 +76,9 @@ while True:
     if r:
         for event in device.read():
             # --- Handle first input after screen off ---
+            if swallow_first_event:
+                print(event.type)
+
             if swallow_first_event and event.type == evdev.ecodes.EV_KEY:
                 print("swallow_first_event")
                 set_brightness(BRIGHTNESS_MAX)  # Restore screen brightness

@@ -24,7 +24,7 @@ BRIGHTNESS_PATH = cfg.get('backlight_path')
 
 # --- Function to set screen brightness ---
 def set_brightness(value: int):
-    print(f"set_brightness({value})")
+    # print(f"set_brightness({value})")
     """Set the backlight brightness to the specified value."""
     subprocess.run(["sudo", "tee", BRIGHTNESS_PATH],
                    input=str(value), text=True, stdout=subprocess.DEVNULL)

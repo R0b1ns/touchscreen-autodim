@@ -1,39 +1,67 @@
 #!/bin/bash
-# Autodim Configure - reliably detects the touchscreen
+# Autodim Configure - automatic touchscreen detection
+
+set -e
 
 CONF_PATH="$(dirname "$(realpath "$0")")/autodim.conf"
 SERVICE_NAME="autodim.service"
 
+echo "=================================="
+echo " Autodim Touchscreen Configuration"
+echo "=================================="
+echo
 echo "Please tap once on the touchscreen..."
-echo "Press CTRL+C to cancel."
+echo "Waiting for touch input (CTRL+C to cancel)."
+echo
 
-python3 << EOF
-import evdev, select, os
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
-CONF_PATH = "$CONF_PATH"
+PIDS=()
 
-# List all event devices
-devices = [evdev.InputDevice(d) for d in evdev.list_devices()]
-fds = {dev.fd: dev for dev in devices}
+# Monitor all input devices simultaneously
+for dev in /dev/input/event*; do
+    [ -e "$dev" ] || continue
 
-# Wait for the first event
-while True:
-    r, _, _ = select.select(fds.keys(), [], [])
-    for fd in r:
-        dev = fds[fd]
-        for event in dev.read():
-            # Found first input event
-            touch_device = dev.path
-            with open(CONF_PATH, 'r') as f:
-                lines = f.readlines()
-            with open(CONF_PATH, 'w') as f:
-                for line in lines:
-                    if line.startswith('device ='):
-                        f.write(f'device = {touch_device}\n')
-                    else:
-                        f.write(line)
-            print(f"Touchscreen device detected: {touch_device}")
-            exit(0)
-EOF
+    (
+        sudo evtest "$dev" 2>/dev/null |
+        while IFS= read -r line; do
+            if [[ "$line" == *"BTN_TOUCH"* && "$line" == *"value 1"* ]] ||
+               [[ "$line" == *"ABS_MT_TRACKING_ID"* && "$line" == *"value"* && "$line" != *"value -1"* ]]; then
+                echo "$dev" > "$TMP_DIR/detected"
+                exit 0
+            fi
+        done
+    ) &
 
-sudo systemctl restart $SERVICE_NAME
+    PIDS+=($!)
+done
+
+# Wait until a device reports a touch
+while [ ! -s "$TMP_DIR/detected" ]; do
+    sleep 0.1
+done
+
+TOUCH_DEVICE=$(cat "$TMP_DIR/detected")
+
+# Stop all monitors
+kill "${PIDS[@]}" 2>/dev/null || true
+wait 2>/dev/null || true
+
+echo
+echo "Touchscreen detected: $TOUCH_DEVICE"
+
+# Update configuration
+if grep -q '^device =' "$CONF_PATH"; then
+    sed -i "s|^device =.*|device = $TOUCH_DEVICE|" "$CONF_PATH"
+else
+    echo "device = $TOUCH_DEVICE" >> "$CONF_PATH"
+fi
+
+echo "Configuration updated: $CONF_PATH"
+
+echo
+echo "Restarting autodim service..."
+sudo systemctl restart "$SERVICE_NAME"
+
+echo "Done!"

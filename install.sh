@@ -1,10 +1,9 @@
 #!/bin/bash
 # Autodim Installer - pure installation
 
-SCRIPT_PATH="$(realpath autodim.py)"
+SCRIPT_PATH="$(realpath autodim.sh)"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 SERVICE_NAME="autodim.service"
-VENV_DIR="$SCRIPT_DIR/.venv"
 CONF_PATH="$SCRIPT_DIR/autodim.conf"
 
 # --- Automatically detect backlight ---
@@ -27,14 +26,8 @@ idle_off = 3600
 backlight_path = $BACKLIGHT_PATH
 EOF
 
-# --- Create Python virtual environment ---
-python3 -m venv "$VENV_DIR"
-source "$VENV_DIR/bin/activate"
-pip install --upgrade pip
-pip install evdev
-deactivate
-
 # --- Create systemd service ---
+
 cat << EOF | sudo tee /etc/systemd/system/$SERVICE_NAME
 [Unit]
 Description=Autodim Touchscreen
@@ -42,9 +35,10 @@ After=multi-user.target
 
 [Service]
 Type=simple
-ExecStart=$VENV_DIR/bin/python $SCRIPT_PATH
+ExecStart=/bin/bash $SCRIPT_PATH
 Restart=always
-User=pi
+RestartSec=3
+User=root
 WorkingDirectory=$SCRIPT_DIR
 
 [Install]
@@ -52,8 +46,8 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable $SERVICE_NAME
-sudo systemctl restart $SERVICE_NAME
+sudo systemctl enable "$SERVICE_NAME"
+sudo systemctl restart "$SERVICE_NAME"
 
 echo "Autodim installed, .venv created and service started."
 echo "Please run configure.sh to set up the touchscreen device."

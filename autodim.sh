@@ -22,7 +22,24 @@ get_config() {
 
 [[ -f "$CONFIG_PATH" ]] || { echo "ERROR: Configuration not found: $CONFIG_PATH"; exit 1; }
 
-DEVICE=$(get_config device)
+#DEVICE=$(get_config device)
+DEVICE_NAME=$(get_config device_name)
+
+find_device() {
+    local name="$1"
+    for d in /dev/input/event*; do
+        [[ -e "$d" ]] || continue
+        local n=$(cat /sys/class/input/$(basename "$d")/device/name 2>/dev/null)
+        [[ "$n" == "$name" ]] && { echo "$d"; return 0; }
+    done
+    return 1
+}
+
+DEVICE=$(find_device "$DEVICE_NAME") || {
+    echo "ERROR: Touchscreen '$DEVICE_NAME' not found"
+    exit 1
+}
+
 BRIGHTNESS_MAX=$(get_config brightness_max)
 BRIGHTNESS_LOW=$(get_config brightness_low)
 BRIGHTNESS_MIN=$(get_config brightness_min)

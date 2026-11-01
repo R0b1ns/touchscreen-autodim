@@ -22,7 +22,10 @@ brightness_max = 31
 brightness_low = 5
 brightness_min = 0
 idle_dim = 10
-idle_off = 3600
+idle_off = 0
+night_start=22
+night_end=6
+night_idle_off=30
 backlight_path = $BACKLIGHT_PATH
 EOF
 

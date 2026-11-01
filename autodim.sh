@@ -121,6 +121,7 @@ while true; do
     NOW=$SECONDS
     IDLE_TIME=$((NOW - LAST_EVENT))
 
+    # 1. Noch aktiv
     if (( IDLE_TIME < IDLE_DIM )); then
         REMAINING=$((IDLE_DIM - IDLE_TIME))
         if wait_for_input "$REMAINING" no; then
@@ -129,51 +130,45 @@ while true; do
             (( CURRENT_BRIGHTNESS != BRIGHTNESS_MAX )) && fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
         fi
 
-    elif is_night; then
-        local effective_off=$NIGHT_IDLE_OFF
-        if (( effective_off == 0 || IDLE_TIME < effective_off )); then
-            (( CURRENT_BRIGHTNESS != BRIGHTNESS_LOW )) && fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_LOW"
-            if (( effective_off == 0 )); then
-                if wait_for_input "" no; then
-                    LAST_EVENT=$SECONDS
-                    echo "Touch detected"
-                    fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
-                fi
-            else
-                REMAINING=$((effective_off - IDLE_TIME))
-                if wait_for_input "$REMAINING" no; then
-                    LAST_EVENT=$SECONDS
-                    echo "Touch detected"
-                    fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
-                fi
-            fi
+    # 2. Nacht + Idle-Off erreicht → aus
+    elif is_night && (( NIGHT_IDLE_OFF > 0 && IDLE_TIME >= NIGHT_IDLE_OFF )); then
+        (( CURRENT_BRIGHTNESS != BRIGHTNESS_MIN )) && {
+            echo "Night idle - brightness minimum"
+            set_brightness "$BRIGHTNESS_MIN"
+        }
+        echo "Grab touchscreen - waiting for wake-up touch"
+        if wait_for_input "" yes; then
+            echo "Wake-up touch detected"
+            set_brightness "$BRIGHTNESS_MAX"
+            LAST_EVENT=$SECONDS
+            echo "Brightness restored"
         else
-            (( CURRENT_BRIGHTNESS != BRIGHTNESS_MIN )) && {
-                echo "Night idle - brightness minimum"
-                set_brightness "$BRIGHTNESS_MIN"
-            }
-            echo "Grab touchscreen - waiting for wake-up touch"
-            if wait_for_input "" yes; then
-                echo "Wake-up touch detected"
-                set_brightness "$BRIGHTNESS_MAX"
-                LAST_EVENT=$SECONDS
-                echo "Brightness restored"
-            else
-                echo "WARNING: Input device stopped responding."
-                sleep 2
-            fi
+            echo "WARNING: Input device stopped responding."
+            sleep 2
         fi
 
+    # 3. Alles andere → Dimmen und dort bleiben
     else
-        # Tag: immer bei LOW bleiben, nie aus
         (( CURRENT_BRIGHTNESS != BRIGHTNESS_LOW )) && {
-            echo "Day idle - stay at BRIGHTNESS_LOW"
+            echo "Fade to BRIGHTNESS_LOW"
             fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_LOW"
         }
-        if wait_for_input "" no; then
-            LAST_EVENT=$SECONDS
-            echo "Touch detected"
-            fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
+
+        if is_night && (( NIGHT_IDLE_OFF > 0 )); then
+            REMAINING=$((NIGHT_IDLE_OFF - IDLE_TIME))
+            (( REMAINING < 1 )) && REMAINING=1
+            if wait_for_input "$REMAINING" no; then
+                LAST_EVENT=$SECONDS
+                echo "Touch detected"
+                fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
+            fi
+        else
+            # Tag oder night_idle_off=0 → unendlich warten
+            if wait_for_input "" no; then
+                LAST_EVENT=$SECONDS
+                echo "Touch detected"
+                fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
+            fi
         fi
     fi
 done

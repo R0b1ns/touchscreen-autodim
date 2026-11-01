@@ -58,6 +58,16 @@ else
     echo "device = $TOUCH_DEVICE" >> "$CONF_PATH"
 fi
 
+# Namen auslesen
+NAME=$(cat /sys/class/input/$(basename "$TOUCH_DEVICE")/device/name 2>/dev/null || echo "unknown")
+
+# in Config schreiben
+if grep -q '^device_name =' "$CONF_PATH"; then
+    sed -i "s|^device_name =.*|device_name = $NAME|" "$CONF_PATH"
+else
+    echo "device_name = $NAME" >> "$CONF_PATH"
+fi
+
 echo "Configuration updated: $CONF_PATH"
 
 echo

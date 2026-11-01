@@ -1,5 +1,5 @@
 #!/bin/bash
-# Autodim - Touchscreen brightness management
+# Autodim - Touchscreen brightness management + Brightness Menu
 set -u
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 CONFIG_PATH="$SCRIPT_DIR/autodim.conf"
@@ -22,9 +22,7 @@ get_config() {
 
 [[ -f "$CONFIG_PATH" ]] || { echo "ERROR: Configuration not found: $CONFIG_PATH"; exit 1; }
 
-#DEVICE=$(get_config device)
 DEVICE_NAME=$(get_config device_name)
-
 find_device() {
     local name="$1"
     for d in /dev/input/event*; do
@@ -34,7 +32,6 @@ find_device() {
     done
     return 1
 }
-
 DEVICE=$(find_device "$DEVICE_NAME") || {
     echo "ERROR: Touchscreen '$DEVICE_NAME' not found"
     exit 1
@@ -59,6 +56,7 @@ done
 [[ -e "$DEVICE" ]] || { echo "ERROR: Input device not found: $DEVICE"; exit 1; }
 [[ -w "$BRIGHTNESS_PATH" ]] || { echo "ERROR: Cannot write brightness: $BRIGHTNESS_PATH"; exit 1; }
 command -v evtest >/dev/null 2>&1 || { echo "ERROR: evtest is not installed."; exit 1; }
+command -v yad >/dev/null 2>&1 || { echo "ERROR: yad is not installed (sudo apt install yad)"; exit 1; }
 
 CURRENT_BRIGHTNESS=$BRIGHTNESS_MAX
 
@@ -77,8 +75,32 @@ fade_brightness() {
     done
 }
 
+show_brightness_menu() {
+    local val
+    val=$(yad --scale \
+        --title="Helligkeit" \
+        --text="Helligkeit einstellen" \
+        --min-value="$BRIGHTNESS_MIN" \
+        --max-value="$BRIGHTNESS_MAX" \
+        --value="$CURRENT_BRIGHTNESS" \
+        --step=1 \
+        --button="OK:0" \
+        --button="Abbrechen:1" \
+        --width=400 --height=120 \
+        --on-top --center 2>/dev/null) || return
+
+    [[ -n "$val" ]] && set_brightness "$val"
+}
+
+# Return codes:
+# 0 = normal touch
+# 2 = long press (menu)
+# 1 = timeout / error
 wait_for_input() {
-    local wait_seconds="${1:-}" grab="${2:-no}" line pid fd detected=1
+    local wait_seconds="${1:-}" grab="${2:-no}"
+    local line pid fd
+    local press_start=0
+    local detected=1
     local -a args=()
     [[ "$grab" == "yes" ]] && args+=(--grab)
 
@@ -92,7 +114,26 @@ wait_for_input() {
         else
             IFS= read -r line <&"$fd" || break
         fi
-        [[ "$line" == Event:* ]] && { detected=0; break; }
+
+        if [[ "$line" == Event:* ]]; then
+            # BTN_TOUCH press
+            if [[ "$line" == *"BTN_TOUCH"* && "$line" == *"value 1"* ]]; then
+                press_start=$SECONDS
+                detected=0
+            # BTN_TOUCH release
+            elif [[ "$line" == *"BTN_TOUCH"* && "$line" == *"value 0"* ]]; then
+                if (( press_start > 0 && SECONDS - press_start >= 1 )); then
+                    detected=2   # long press
+                else
+                    detected=0   # normal tap
+                fi
+                break
+            # Fallback for devices without BTN_TOUCH
+            elif [[ "$line" == *"ABS_MT_TRACKING_ID"* && "$line" != *"value -1"* ]]; then
+                detected=0
+                break
+            fi
+        fi
     done
 
     kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null || true
@@ -121,14 +162,24 @@ while true; do
     NOW=$SECONDS
     IDLE_TIME=$((NOW - LAST_EVENT))
 
-    # 1. Noch aktiv
-    if (( IDLE_TIME < IDLE_DIM )); then
-        REMAINING=$((IDLE_DIM - IDLE_TIME))
-        if wait_for_input "$REMAINING" no; then
-            LAST_EVENT=$SECONDS
+    handle_touch() {
+        local rc=$1
+        LAST_EVENT=$SECONDS
+        if (( rc == 2 )); then
+            echo "Long press → Brightness menu"
+            show_brightness_menu
+        else
             echo "Touch detected"
             (( CURRENT_BRIGHTNESS != BRIGHTNESS_MAX )) && fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
         fi
+    }
+
+    # 1. Noch aktiv
+    if (( IDLE_TIME < IDLE_DIM )); then
+        REMAINING=$((IDLE_DIM - IDLE_TIME))
+        wait_for_input "$REMAINING" no
+        rc=$?
+        (( rc == 0 || rc == 2 )) && handle_touch $rc
 
     # 2. Nacht + Idle-Off erreicht → aus
     elif is_night && (( NIGHT_IDLE_OFF > 0 && IDLE_TIME >= NIGHT_IDLE_OFF )); then
@@ -137,17 +188,19 @@ while true; do
             set_brightness "$BRIGHTNESS_MIN"
         }
         echo "Grab touchscreen - waiting for wake-up touch"
-        if wait_for_input "" yes; then
+        wait_for_input "" yes
+        rc=$?
+        if (( rc == 0 || rc == 2 )); then
             echo "Wake-up touch detected"
             set_brightness "$BRIGHTNESS_MAX"
             LAST_EVENT=$SECONDS
-            echo "Brightness restored"
+            (( rc == 2 )) && show_brightness_menu
         else
             echo "WARNING: Input device stopped responding."
             sleep 2
         fi
 
-    # 3. Alles andere → Dimmen und dort bleiben
+    # 3. Dimmen
     else
         (( CURRENT_BRIGHTNESS != BRIGHTNESS_LOW )) && {
             echo "Fade to BRIGHTNESS_LOW"
@@ -157,18 +210,13 @@ while true; do
         if is_night && (( NIGHT_IDLE_OFF > 0 )); then
             REMAINING=$((NIGHT_IDLE_OFF - IDLE_TIME))
             (( REMAINING < 1 )) && REMAINING=1
-            if wait_for_input "$REMAINING" no; then
-                LAST_EVENT=$SECONDS
-                echo "Touch detected"
-                fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
-            fi
+            wait_for_input "$REMAINING" no
+            rc=$?
+            (( rc == 0 || rc == 2 )) && handle_touch $rc
         else
-            # Tag oder night_idle_off=0 → unendlich warten
-            if wait_for_input "" no; then
-                LAST_EVENT=$SECONDS
-                echo "Touch detected"
-                fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
-            fi
+            wait_for_input "" no
+            rc=$?
+            (( rc == 0 || rc == 2 )) && handle_touch $rc
         fi
     fi
 done

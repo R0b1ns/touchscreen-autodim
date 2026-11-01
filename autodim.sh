@@ -29,12 +29,16 @@ BRIGHTNESS_MIN=$(get_config brightness_min)
 IDLE_DIM=$(get_config idle_dim)
 IDLE_OFF=$(get_config idle_off)
 BRIGHTNESS_PATH=$(get_config backlight_path)
+NIGHT_START=$(get_config night_start)
+NIGHT_END=$(get_config night_end)
+NIGHT_IDLE_OFF=$(get_config night_idle_off)
 
-for name in BRIGHTNESS_MAX BRIGHTNESS_LOW BRIGHTNESS_MIN IDLE_DIM IDLE_OFF; do
+for name in BRIGHTNESS_MAX BRIGHTNESS_LOW BRIGHTNESS_MIN IDLE_DIM IDLE_OFF NIGHT_START NIGHT_END NIGHT_IDLE_OFF; do
     [[ "${!name}" =~ ^[0-9]+$ ]] || { echo "ERROR: Invalid configuration value: $name"; exit 1; }
 done
 [[ -n "$DEVICE" && -n "$BRIGHTNESS_PATH" ]] || { echo "ERROR: Missing device or backlight_path."; exit 1; }
-(( IDLE_DIM < IDLE_OFF )) || { echo "ERROR: idle_dim must be smaller than idle_off."; exit 1; }
+(( IDLE_DIM > 0 )) || { echo "ERROR: idle_dim must be > 0"; exit 1; }
+(( NIGHT_START >= 0 && NIGHT_START <= 23 && NIGHT_END >= 0 && NIGHT_END <= 23 )) || { echo "ERROR: night_start/end must be 0-23"; exit 1; }
 [[ -e "$DEVICE" ]] || { echo "ERROR: Input device not found: $DEVICE"; exit 1; }
 [[ -w "$BRIGHTNESS_PATH" ]] || { echo "ERROR: Cannot write brightness: $BRIGHTNESS_PATH"; exit 1; }
 command -v evtest >/dev/null 2>&1 || { echo "ERROR: evtest is not installed."; exit 1; }
@@ -80,6 +84,16 @@ wait_for_input() {
     return "$detected"
 }
 
+is_night() {
+    local h=$(date +%H)
+    h=$((10#$h))
+    if (( NIGHT_START > NIGHT_END )); then
+        (( h >= NIGHT_START || h < NIGHT_END ))
+    else
+        (( h >= NIGHT_START && h < NIGHT_END ))
+    fi
+}
+
 echo "Autodim started"
 echo "Device: $DEVICE"
 echo "Brightness: $BRIGHTNESS_MAX"
@@ -98,35 +112,51 @@ while true; do
             (( CURRENT_BRIGHTNESS != BRIGHTNESS_MAX )) && fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
         fi
 
-    elif (( IDLE_TIME < IDLE_OFF )); then
-        (( CURRENT_BRIGHTNESS != BRIGHTNESS_LOW )) && {
-            echo "Fade to BRIGHTNESS_LOW"
-            fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_LOW"
-        }
-        NOW=$SECONDS
-        IDLE_TIME=$((NOW - LAST_EVENT))
-        REMAINING=$((IDLE_OFF - IDLE_TIME))
-        if (( REMAINING > 0 )) && wait_for_input "$REMAINING" no; then
-            LAST_EVENT=$SECONDS
-            echo "Touch detected"
-            fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
+    elif is_night; then
+        local effective_off=$NIGHT_IDLE_OFF
+        if (( effective_off == 0 || IDLE_TIME < effective_off )); then
+            (( CURRENT_BRIGHTNESS != BRIGHTNESS_LOW )) && fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_LOW"
+            if (( effective_off == 0 )); then
+                if wait_for_input "" no; then
+                    LAST_EVENT=$SECONDS
+                    echo "Touch detected"
+                    fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
+                fi
+            else
+                REMAINING=$((effective_off - IDLE_TIME))
+                if wait_for_input "$REMAINING" no; then
+                    LAST_EVENT=$SECONDS
+                    echo "Touch detected"
+                    fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
+                fi
+            fi
+        else
+            (( CURRENT_BRIGHTNESS != BRIGHTNESS_MIN )) && {
+                echo "Night idle - brightness minimum"
+                set_brightness "$BRIGHTNESS_MIN"
+            }
+            echo "Grab touchscreen - waiting for wake-up touch"
+            if wait_for_input "" yes; then
+                echo "Wake-up touch detected"
+                set_brightness "$BRIGHTNESS_MAX"
+                LAST_EVENT=$SECONDS
+                echo "Brightness restored"
+            else
+                echo "WARNING: Input device stopped responding."
+                sleep 2
+            fi
         fi
 
     else
-        (( CURRENT_BRIGHTNESS != BRIGHTNESS_MIN )) && {
-            echo "Screen idle - brightness minimum"
-            set_brightness "$BRIGHTNESS_MIN"
+        # Tag: immer bei LOW bleiben, nie aus
+        (( CURRENT_BRIGHTNESS != BRIGHTNESS_LOW )) && {
+            echo "Day idle - stay at BRIGHTNESS_LOW"
+            fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_LOW"
         }
-        echo "Grab touchscreen - waiting for wake-up touch"
-        if wait_for_input "" yes; then
-            echo "Wake-up touch detected"
-            set_brightness "$BRIGHTNESS_MAX"
+        if wait_for_input "" no; then
             LAST_EVENT=$SECONDS
-            echo "Brightness restored"
-            echo "Touchscreen released"
-        else
-            echo "WARNING: Input device stopped responding."
-            sleep 2
+            echo "Touch detected"
+            fade_brightness "$CURRENT_BRIGHTNESS" "$BRIGHTNESS_MAX"
         fi
     fi
 done

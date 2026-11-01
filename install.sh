@@ -52,5 +52,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 
+sudo apt install yad
+
 echo "Autodim installed, service started."
 echo "Please run configure.sh to set up the touchscreen device."
